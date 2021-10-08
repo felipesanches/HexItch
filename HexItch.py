@@ -24,7 +24,7 @@ context = {
 def draw_ui(screen):
     key = None
     cursor_x = 0
-    cursor_y = 2
+    cursor_y = 0
 
     # Clear and refresh the screen for a blank canvas
     screen.clear()
@@ -66,11 +66,18 @@ def draw_ui(screen):
         elif key == curses.KEY_LEFT:
             cursor_x = cursor_x - 1
 
-        cursor_x = max(0, cursor_x)
-        cursor_x = min(width-1, cursor_x)
+        if cursor_x > 15:
+            cursor_x = 0
+            cursor_y += 1
+        elif cursor_x < 0:
+            if cursor_y > 0:
+                cursor_x = 15
+                cursor_y -= 1
+            else:
+                cursor_x = 0
 
         cursor_y = max(0, cursor_y)
-        cursor_y = min(height-1, cursor_y)
+        cursor_y = min(height-5, cursor_y)
 
         # Rendering some text
         percentage = 100*context['address']/context['filesize']
@@ -83,15 +90,25 @@ def draw_ui(screen):
 
         screen.addstr(0, 0, pad_str(header_str, width), curses.color_pair(COLOR_HEADER))
         screen.addstr(1, 0, pad_str(subheader_str, width), curses.color_pair(COLOR_SUBHEADER))
+        screen.addstr(2, 0, "<Active>", curses.color_pair(COLOR_ADDRESS_HIGHLIGHT))
+
+        for column in range(16):
+            if column == cursor_x:
+                addr_color = COLOR_ADDRESS_HIGHLIGHT
+            else:
+                addr_color = COLOR_ADDRESS
+            screen.addstr(2, 11 + column*3 + int(column/4)%4,
+                          f"{column:02X}", curses.color_pair(addr_color))
 
         line_addr = context["page_address"]
-        for line_num in range(2,height-2):
+        for line_num in range(height-4):
             if line_num == cursor_y:
                 addr_color = COLOR_ADDRESS_HIGHLIGHT
             else:
                 addr_color = COLOR_ADDRESS
 
-            screen.addstr(line_num, 0, f'{line_addr:08X}', curses.color_pair(addr_color))
+            screen.addstr(3 + line_num, 0, f'{line_addr:08X}', curses.color_pair(addr_color))
+
             line_addr += 16
 
 
@@ -118,7 +135,7 @@ def draw_ui(screen):
         screen.addstr(height - 1, x,
                       " " * (width - x - 1), curses.color_pair(COLOR_MENU_WORDS))
 
-        screen.move(cursor_y, cursor_x)
+        screen.move(3 + cursor_y, 11 + cursor_x*3 + int(cursor_x/4)%4)
 
         # Refresh the screen
         screen.refresh()
