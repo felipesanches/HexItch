@@ -16,6 +16,8 @@ RELEASE_YEAR = "2021"
 context = {}
 
 def draw_ui(screen):
+    screen.clear()
+
     key = None
     cursor_x = 0
     cursor_y = 0
@@ -62,20 +64,37 @@ def draw_ui(screen):
             cursor_x = 0
             cursor_y += 1
         elif cursor_x < 0:
-            if cursor_y > 0:
+            if cursor_y == 0:
+                if context["page_address"] > 0:
+                    cursor_x = 15
+                    cursor_y -= 1
+                else:
+                    cursor_x = 0
+            else:
                 cursor_x = 15
                 cursor_y -= 1
-            else:
-                cursor_x = 0
 
-        cursor_y = max(0, cursor_y)
-        cursor_y = min(height-5, cursor_y)
+        if cursor_y < 0:
+            cursor_y = 0;
+            if context["page_address"] > 0:
+                context["page_address"] -= 0x10
+
+        elif cursor_y > height-5:
+            cursor_y = height-5;
+            if context["page_address"] + (height-4) * 0x10 < context["filesize"]:
+               context["page_address"] += 0x10
+
+        context['address'] = context["page_address"] + cursor_y * 0x10 + cursor_x
+
+        if context['address'] >= context["filesize"]:
+            cursor_x = context["filesize"] % 16
+            context['address'] = context['filesize']
 
         # Rendering some text
         percentage = 100*context['address']/context['filesize']
         percentage = f"{percentage:.1f}%"
         header_str = f"Selected : 00000000h - -= {PROGRAM_NAME} {VERSION} GPLv3+ Felipe Sanches {RELEASE_YEAR} =- - 0  -   {context['filesize_formatted']}"
-        subheader_str = f"{context['address']}/{context['filesize_hex']}  Hex      {percentage}   {context['filename']}"
+        subheader_str = f"{context['address']:08X}/{context['filesize_hex']}  Hex      {percentage}   {context['filename']}"
 
         def pad_str(s, width):
             return s + " " * (width - len(s) - 1)
@@ -132,28 +151,31 @@ def draw_ui(screen):
 
 
         # Draw file contents
-        line_addr = context["page_address"]
         for line_num in range(height-4):
             for column in range(16):
                 if column == cursor_x and line_num == cursor_y:
                     addr_color = COLOR_TEXT_HIGHLIGHT
                 else:
                     addr_color = COLOR_TEXT
-                addr = line_addr + column
-                context["file"].seek(addr)
-                value = context["file"].read(1)
-                try:
-                    char_value = value.decode('ascii')
-                    if not char_value.isprintable():
+                addr = context["page_address"] + 0x10 * line_num + column
+
+                hex_value = "  "
+                char_value = " "
+                if addr < context["filesize"]:
+                    context["file"].seek(addr)
+                    value = context["file"].read(1)
+                    try:
+                        char_value = value.decode('ascii')
+                        if not char_value.isprintable():
+                            char_value = "."
+                    except:
                         char_value = "."
-                except:
-                    char_value = "."
+                    hex_value = f"{ord(value):02X}"
 
                 screen.addstr(3 + line_num, 11 + column*3 + int(column/4),
-                              f"{ord(value):02X}", curses.color_pair(addr_color))
+                              hex_value, curses.color_pair(addr_color))
                 screen.addstr(3 + line_num, 64 + column,
-                              f"{char_value}", curses.color_pair(addr_color))
-            line_addr += 0x10
+                              char_value, curses.color_pair(addr_color))
 
 
         # Draw blinking cursor
