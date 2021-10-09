@@ -26,10 +26,6 @@ def draw_ui(screen):
     cursor_x = 0
     cursor_y = 0
 
-    # Clear and refresh the screen for a blank canvas
-    screen.clear()
-    screen.refresh()
-
     COLOR_HEADER = 1
     COLOR_SUBHEADER = 2
     COLOR_ADDRESS = 3
@@ -39,13 +35,16 @@ def draw_ui(screen):
     COLOR_MENU_NUMBERS = 7
     COLOR_MENU_WORDS = 8
 
+    def highlight(color):
+        return color + 8
+
     # Start colors in curses
     curses.start_color()
     curses.init_pair(COLOR_HEADER, curses.COLOR_WHITE, curses.COLOR_BLUE)
     curses.init_pair(COLOR_SUBHEADER, curses.COLOR_WHITE, curses.COLOR_RED)
     curses.init_pair(COLOR_ADDRESS, curses.COLOR_BLUE, curses.COLOR_BLACK)
-    curses.init_pair(COLOR_ADDRESS_HIGHLIGHT, curses.COLOR_CYAN, curses.COLOR_BLACK)
-    curses.init_pair(COLOR_TEXT, curses.COLOR_WHITE, curses.COLOR_BLACK)
+    curses.init_pair(COLOR_ADDRESS_HIGHLIGHT, highlight(curses.COLOR_BLUE), curses.COLOR_BLACK)
+    curses.init_pair(COLOR_TEXT, highlight(curses.COLOR_BLACK), curses.COLOR_BLACK)
     curses.init_pair(COLOR_TEXT_HIGHLIGHT, curses.COLOR_WHITE, curses.COLOR_BLACK)
     curses.init_pair(COLOR_MENU_NUMBERS, curses.COLOR_WHITE, curses.COLOR_BLACK)
     curses.init_pair(COLOR_MENU_WORDS, curses.COLOR_BLACK, curses.COLOR_CYAN)
@@ -54,17 +53,16 @@ def draw_ui(screen):
     while (key != ord('q')):
 
         # Initialization
-        screen.clear()
         height, width = screen.getmaxyx()
 
         if key == curses.KEY_DOWN:
-            cursor_y = cursor_y + 1
+            cursor_y += 1
         elif key == curses.KEY_UP:
-            cursor_y = cursor_y - 1
+            cursor_y -= 1
         elif key == curses.KEY_RIGHT:
-            cursor_x = cursor_x + 1
+            cursor_x += 1
         elif key == curses.KEY_LEFT:
-            cursor_x = cursor_x - 1
+            cursor_x -= 1
 
         if cursor_x > 15:
             cursor_x = 0
@@ -92,13 +90,16 @@ def draw_ui(screen):
         screen.addstr(1, 0, pad_str(subheader_str, width), curses.color_pair(COLOR_SUBHEADER))
         screen.addstr(2, 0, "<Active>", curses.color_pair(COLOR_ADDRESS_HIGHLIGHT))
 
+        # Draw column addresses on the top
         for column in range(16):
             if column == cursor_x:
                 addr_color = COLOR_ADDRESS_HIGHLIGHT
             else:
                 addr_color = COLOR_ADDRESS
-            screen.addstr(2, 11 + column*3 + int(column/4)%4,
+            screen.addstr(2, 11 + column*3 + int(column/4),
                           f"{column:02X}", curses.color_pair(addr_color))
+            screen.addstr(2, 64 + column,
+                          f"{column:1X}", curses.color_pair(addr_color))
 
         line_addr = context["page_address"]
         for line_num in range(height-4):
@@ -109,7 +110,7 @@ def draw_ui(screen):
 
             screen.addstr(3 + line_num, 0, f'{line_addr:08X}', curses.color_pair(addr_color))
 
-            line_addr += 16
+            line_addr += 0x10
 
 
         # Render menu bar
@@ -135,13 +136,40 @@ def draw_ui(screen):
         screen.addstr(height - 1, x,
                       " " * (width - x - 1), curses.color_pair(COLOR_MENU_WORDS))
 
-        screen.move(3 + cursor_y, 11 + cursor_x*3 + int(cursor_x/4)%4)
 
-        # Refresh the screen
-        screen.refresh()
+        # Draw file contents
+        line_addr = context["page_address"]
+        for line_num in range(height-4):
+            for column in range(16):
+                if column == cursor_x and line_num == cursor_y:
+                    addr_color = COLOR_TEXT_HIGHLIGHT
+                else:
+                    addr_color = COLOR_TEXT
+                addr = line_addr + column
+                context["file"].seek(addr)
+                value = context["file"].read(1)
+                try:
+                    char_value = value.decode('ascii')
+                    if not char_value.isprintable():
+                        char_value = "."
+                except:
+                    char_value = "."
+
+                screen.addstr(3 + line_num, 11 + column*3 + int(column/4),
+                              f"{ord(value):02X}", curses.color_pair(addr_color))
+                screen.addstr(3 + line_num, 64 + column,
+                              f"{char_value}", curses.color_pair(addr_color))
+            line_addr += 0x10
+
+
+        # Draw blinking cursor
+        screen.move(3 + cursor_y, 11 + cursor_x*3 + int(cursor_x/4))
 
         # Wait for next input
         key = screen.getch()
+
+        # Refresh the screen
+        screen.refresh()
 
 
 def format_filesize(size):
@@ -158,7 +186,7 @@ def format_filesize(size):
 def load_file(filename):
     context["filename"] = filename
     context["file"] = open(filename, "rb")
-    context["filesize"] = os.path.getsize(context["filename"])
+    context["filesize"] = os.path.getsize(filename)
     context["filesize_formatted"] = format_filesize(context["filesize"])
     context["filesize_hex"] = f'{context["filesize"]:08X}'
     context["address"] = 0x00000000
