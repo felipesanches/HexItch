@@ -13,13 +13,7 @@ PROGRAM_NAME = "HexItch"
 VERSION = "v0.0.1"
 RELEASE_YEAR = "2021"
 
-context = {
-    "file": None,
-    "filesize_formatted": None,
-    "filesize_hex": None,
-    "address": None,
-    "page_address": None
-}
+context = {}
 
 def draw_ui(screen):
     key = None
