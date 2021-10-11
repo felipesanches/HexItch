@@ -26,7 +26,7 @@ COLOR_MENU_NUMBERS = 7
 COLOR_MENU_WORDS = 8
 
 
-def CodeMode(screen, cursor_x, cursor_y, height):
+def CodeMode(screen, key, height):
     if "opcodes" not in context:
        return
 
@@ -34,31 +34,117 @@ def CodeMode(screen, cursor_x, cursor_y, height):
     content = context["file"].read((height-5) * 10)
     dasm = context["opcodes"].disassemble(content, context["page_address"])
 
+    if key == curses.KEY_DOWN:
+        context["cursor_y"] += 1
+    elif key == curses.KEY_UP:
+        context["cursor_y"] -= 1
+    elif key == curses.KEY_RIGHT:
+        context["cursor_x"] += 1
+    elif key == curses.KEY_LEFT:
+        context["cursor_x"] -= 1
+
+    vma, instr_size, instr = dasm[context["cursor_y"]]
+    if context["cursor_x"] > instr_size-1:
+        context["cursor_x"] = 0
+        context["cursor_y"] += 1
+    elif context["cursor_x"] < 0:
+        if context["cursor_y"] == 0:
+            if context["page_address"] > 0:
+                context["cursor_x"] = 15
+                context["cursor_y"] -= 1
+            else:
+                context["cursor_x"] = 0
+        else:
+            context["cursor_x"] = 15
+            context["cursor_y"] -= 1
+
+    if context["cursor_y"] < 0:
+        context["cursor_y"] = 0;
+        if context["page_address"] > 0:
+            context["page_address"] -= 0x10
+
+    elif context["cursor_y"] > height-5:
+        context["cursor_y"] = height-5;
+        if context["page_address"] + (height-4) * 0x10 < context["filesize"]:
+           context["page_address"] += 0x10
+
+    context['address'] = context["page_address"] + context["cursor_y"] * 0x10 + context["cursor_x"]
+
+    if context['address'] >= context["filesize"]:
+        context["cursor_x"] = context["filesize"] % 16
+        context['address'] = context['filesize']
+
     offset = 0
-    for line_num in range(height-5):
-        if line_num == cursor_y:
+    for line_num in range(height-3):
+        if line_num == context["cursor_y"]:
             addr_color = COLOR_ADDRESS_HIGHLIGHT
-            text_color = COLOR_TEXT_HIGHLIGHT
+            disasm_color = COLOR_TEXT_HIGHLIGHT
         else:
             addr_color = COLOR_ADDRESS
-            text_color = COLOR_TEXT
+            disasm_color = COLOR_TEXT
 
         vma, size, instr = dasm[line_num]
-        screen.addstr(3 + line_num, 0,
+        screen.addstr(2 + line_num, 0,
                       f"{vma:08X}", curses.color_pair(addr_color))
-        screen.addstr(3 + line_num, 40,
-                      instr, curses.color_pair(text_color))
+        screen.addstr(2 + line_num, 40,
+                      instr, curses.color_pair(disasm_color))
         for i in range(size):
-            screen.addstr(3 + line_num, 11 + 2*i,
+            if line_num == context["cursor_y"] and i == context["cursor_x"]:
+                text_color = COLOR_TEXT_HIGHLIGHT
+            else:
+                text_color = COLOR_TEXT
+
+            screen.addstr(2 + line_num, 10 + 2*i,
                           f"{content[offset]:02X}", curses.color_pair(text_color))
             offset += 1
-        
+
+    # Draw blinking cursor
+    screen.move(2 + context["cursor_y"], 10 + context["cursor_x"]*2)
 
 
-def HexMode(screen, cursor_x, cursor_y, height):
+def HexMode(screen, key, height):
+    if key == curses.KEY_DOWN:
+        context["cursor_y"] += 1
+    elif key == curses.KEY_UP:
+        context["cursor_y"] -= 1
+    elif key == curses.KEY_RIGHT:
+        context["cursor_x"] += 1
+    elif key == curses.KEY_LEFT:
+        context["cursor_x"] -= 1
+
+    if context["cursor_x"] > 15:
+        context["cursor_x"] = 0
+        context["cursor_y"] += 1
+    elif context["cursor_x"] < 0:
+        if context["cursor_y"] == 0:
+            if context["page_address"] > 0:
+                context["cursor_x"] = 15
+                context["cursor_y"] -= 1
+            else:
+                context["cursor_x"] = 0
+        else:
+            context["cursor_x"] = 15
+            context["cursor_y"] -= 1
+
+    if context["cursor_y"] < 0:
+        context["cursor_y"] = 0;
+        if context["page_address"] > 0:
+            context["page_address"] -= 0x10
+
+    elif context["cursor_y"] > height-5:
+        context["cursor_y"] = height-5;
+        if context["page_address"] + (height-4) * 0x10 < context["filesize"]:
+           context["page_address"] += 0x10
+
+    context['address'] = context["page_address"] + context["cursor_y"] * 0x10 + context["cursor_x"]
+
+    if context['address'] >= context["filesize"]:
+        context["cursor_x"] = context["filesize"] % 16
+        context['address'] = context['filesize']
+
     # Draw column addresses on the top:
     for column in range(16):
-        if column == cursor_x:
+        if column == context["cursor_x"]:
             addr_color = COLOR_ADDRESS_HIGHLIGHT
         else:
             addr_color = COLOR_ADDRESS
@@ -69,7 +155,7 @@ def HexMode(screen, cursor_x, cursor_y, height):
 
     line_addr = context["page_address"]
     for line_num in range(height-4):
-        if line_num == cursor_y:
+        if line_num == context["cursor_y"]:
             addr_color = COLOR_ADDRESS_HIGHLIGHT
         else:
             addr_color = COLOR_ADDRESS
@@ -78,10 +164,13 @@ def HexMode(screen, cursor_x, cursor_y, height):
 
         line_addr += 0x10
 
+    # Draw blinking cursor
+    screen.move(3 + context["cursor_y"], 11 + context["cursor_x"]*3 + int(context["cursor_x"]/4))
+
     # Draw file contents:
     for line_num in range(height-4):
         for column in range(16):
-            if column == cursor_x and line_num == cursor_y:
+            if column == context["cursor_x"] and line_num == context["cursor_y"]:
                 addr_color = COLOR_TEXT_HIGHLIGHT
             else:
                 addr_color = COLOR_TEXT
@@ -110,8 +199,8 @@ def draw_ui(screen):
     screen.clear()
 
     key = None
-    cursor_x = 0
-    cursor_y = 0
+    context["cursor_x"] = 0
+    context["cursor_y"] = 0
 
     def highlight(color):
         return color + 8
@@ -134,44 +223,8 @@ def draw_ui(screen):
         height, width = screen.getmaxyx()
         screen.clear()
 
-        if key == curses.KEY_DOWN:
-            cursor_y += 1
-        elif key == curses.KEY_UP:
-            cursor_y -= 1
-        elif key == curses.KEY_RIGHT:
-            cursor_x += 1
-        elif key == curses.KEY_LEFT:
-            cursor_x -= 1
-
-        if cursor_x > 15:
-            cursor_x = 0
-            cursor_y += 1
-        elif cursor_x < 0:
-            if cursor_y == 0:
-                if context["page_address"] > 0:
-                    cursor_x = 15
-                    cursor_y -= 1
-                else:
-                    cursor_x = 0
-            else:
-                cursor_x = 15
-                cursor_y -= 1
-
-        if cursor_y < 0:
-            cursor_y = 0;
-            if context["page_address"] > 0:
-                context["page_address"] -= 0x10
-
-        elif cursor_y > height-5:
-            cursor_y = height-5;
-            if context["page_address"] + (height-4) * 0x10 < context["filesize"]:
-               context["page_address"] += 0x10
-
-        context['address'] = context["page_address"] + cursor_y * 0x10 + cursor_x
-
-        if context['address'] >= context["filesize"]:
-            cursor_x = context["filesize"] % 16
-            context['address'] = context['filesize']
+        CodeMode(screen, key, height)
+        # HexMode(screen, key, height)
 
         # Rendering some text
         percentage = 100*context['address']/context['filesize']
@@ -181,6 +234,9 @@ def draw_ui(screen):
 
         def pad_str(s, width):
             return s + " " * (width - len(s) - 1)
+
+
+        _y, _x = screen.getyx()
 
         screen.addstr(0, 0, pad_str(header_str, width), curses.color_pair(COLOR_HEADER))
         screen.addstr(1, 0, pad_str(subheader_str, width), curses.color_pair(COLOR_SUBHEADER))
@@ -209,12 +265,7 @@ def draw_ui(screen):
         screen.addstr(height - 1, x,
                       " " * (width - x - 1), curses.color_pair(COLOR_MENU_WORDS))
 
-
-        CodeMode(screen, cursor_x, cursor_y, height)
-        # HexMode(screen, cursor_x, cursor_y, height)
-
-        # Draw blinking cursor
-        screen.move(3 + cursor_y, 11 + cursor_x*3 + int(cursor_x/4))
+        screen.move(_y, _x)
 
         # Wait for next input
         key = screen.getch()
@@ -244,9 +295,7 @@ def load_file(filename):
     context["page_address"] = 0x00000000
     try:
         bfd = Bfd(filename)
-        section = bfd.sections.get(".text")
         context["bfd"] = bfd
-        context["section"] = section
         context["opcodes"] = Opcodes(bfd)
         context["page_address"] = bfd.start_address
     except:
