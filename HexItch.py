@@ -6,6 +6,8 @@
 # Released under the terms of the GNU General Public License version 3 or later
 
 import curses
+from pybfd3.bfd import Bfd
+from pybfd3.opcodes import Opcodes
 import os
 import sys
 
@@ -14,6 +16,95 @@ VERSION = "v0.0.1"
 RELEASE_YEAR = "2021"
 
 context = {}
+COLOR_HEADER = 1
+COLOR_SUBHEADER = 2
+COLOR_ADDRESS = 3
+COLOR_ADDRESS_HIGHLIGHT = 4
+COLOR_TEXT = 5
+COLOR_TEXT_HIGHLIGHT = 6
+COLOR_MENU_NUMBERS = 7
+COLOR_MENU_WORDS = 8
+
+
+def CodeMode(screen, cursor_x, cursor_y, height):
+    if "opcodes" not in context:
+       return
+
+    context["file"].seek(context["page_address"])
+    content = context["file"].read((height-5) * 10)
+    dasm = context["opcodes"].disassemble(content, context["page_address"])
+
+    offset = 0
+    for line_num in range(height-5):
+        if line_num == cursor_y:
+            addr_color = COLOR_ADDRESS_HIGHLIGHT
+            text_color = COLOR_TEXT_HIGHLIGHT
+        else:
+            addr_color = COLOR_ADDRESS
+            text_color = COLOR_TEXT
+
+        vma, size, instr = dasm[line_num]
+        screen.addstr(3 + line_num, 0,
+                      f"{vma:08X}", curses.color_pair(addr_color))
+        screen.addstr(3 + line_num, 40,
+                      instr, curses.color_pair(text_color))
+        for i in range(size):
+            screen.addstr(3 + line_num, 11 + 2*i,
+                          f"{content[offset]:02X}", curses.color_pair(text_color))
+            offset += 1
+        
+
+
+def HexMode(screen, cursor_x, cursor_y, height):
+    # Draw column addresses on the top:
+    for column in range(16):
+        if column == cursor_x:
+            addr_color = COLOR_ADDRESS_HIGHLIGHT
+        else:
+            addr_color = COLOR_ADDRESS
+        screen.addstr(2, 11 + column*3 + int(column/4),
+                      f"{column:02X}", curses.color_pair(addr_color))
+        screen.addstr(2, 64 + column,
+                      f"{column:1X}", curses.color_pair(addr_color))
+
+    line_addr = context["page_address"]
+    for line_num in range(height-4):
+        if line_num == cursor_y:
+            addr_color = COLOR_ADDRESS_HIGHLIGHT
+        else:
+            addr_color = COLOR_ADDRESS
+
+        screen.addstr(3 + line_num, 0, f'{line_addr:08X}', curses.color_pair(addr_color))
+
+        line_addr += 0x10
+
+    # Draw file contents:
+    for line_num in range(height-4):
+        for column in range(16):
+            if column == cursor_x and line_num == cursor_y:
+                addr_color = COLOR_TEXT_HIGHLIGHT
+            else:
+                addr_color = COLOR_TEXT
+            addr = context["page_address"] + 0x10 * line_num + column
+
+            hex_value = "  "
+            char_value = " "
+            if addr < context["filesize"]:
+                context["file"].seek(addr)
+                value = context["file"].read(1)
+                try:
+                    char_value = value.decode('ascii')
+                    if not char_value.isprintable():
+                        char_value = "."
+                except:
+                    char_value = "."
+                hex_value = f"{ord(value):02X}"
+
+            screen.addstr(3 + line_num, 11 + column*3 + int(column/4),
+                          hex_value, curses.color_pair(addr_color))
+            screen.addstr(3 + line_num, 64 + column,
+                          char_value, curses.color_pair(addr_color))
+
 
 def draw_ui(screen):
     screen.clear()
@@ -21,15 +112,6 @@ def draw_ui(screen):
     key = None
     cursor_x = 0
     cursor_y = 0
-
-    COLOR_HEADER = 1
-    COLOR_SUBHEADER = 2
-    COLOR_ADDRESS = 3
-    COLOR_ADDRESS_HIGHLIGHT = 4
-    COLOR_TEXT = 5
-    COLOR_TEXT_HIGHLIGHT = 6
-    COLOR_MENU_NUMBERS = 7
-    COLOR_MENU_WORDS = 8
 
     def highlight(color):
         return color + 8
@@ -50,6 +132,7 @@ def draw_ui(screen):
 
         # Initialization
         height, width = screen.getmaxyx()
+        screen.clear()
 
         if key == curses.KEY_DOWN:
             cursor_y += 1
@@ -103,29 +186,6 @@ def draw_ui(screen):
         screen.addstr(1, 0, pad_str(subheader_str, width), curses.color_pair(COLOR_SUBHEADER))
         screen.addstr(2, 0, "<Active>", curses.color_pair(COLOR_ADDRESS_HIGHLIGHT))
 
-        # Draw column addresses on the top
-        for column in range(16):
-            if column == cursor_x:
-                addr_color = COLOR_ADDRESS_HIGHLIGHT
-            else:
-                addr_color = COLOR_ADDRESS
-            screen.addstr(2, 11 + column*3 + int(column/4),
-                          f"{column:02X}", curses.color_pair(addr_color))
-            screen.addstr(2, 64 + column,
-                          f"{column:1X}", curses.color_pair(addr_color))
-
-        line_addr = context["page_address"]
-        for line_num in range(height-4):
-            if line_num == cursor_y:
-                addr_color = COLOR_ADDRESS_HIGHLIGHT
-            else:
-                addr_color = COLOR_ADDRESS
-
-            screen.addstr(3 + line_num, 0, f'{line_addr:08X}', curses.color_pair(addr_color))
-
-            line_addr += 0x10
-
-
         # Render menu bar
         menu = { "1": "Info  ",
                 " 2": "Save  ",
@@ -150,33 +210,8 @@ def draw_ui(screen):
                       " " * (width - x - 1), curses.color_pair(COLOR_MENU_WORDS))
 
 
-        # Draw file contents
-        for line_num in range(height-4):
-            for column in range(16):
-                if column == cursor_x and line_num == cursor_y:
-                    addr_color = COLOR_TEXT_HIGHLIGHT
-                else:
-                    addr_color = COLOR_TEXT
-                addr = context["page_address"] + 0x10 * line_num + column
-
-                hex_value = "  "
-                char_value = " "
-                if addr < context["filesize"]:
-                    context["file"].seek(addr)
-                    value = context["file"].read(1)
-                    try:
-                        char_value = value.decode('ascii')
-                        if not char_value.isprintable():
-                            char_value = "."
-                    except:
-                        char_value = "."
-                    hex_value = f"{ord(value):02X}"
-
-                screen.addstr(3 + line_num, 11 + column*3 + int(column/4),
-                              hex_value, curses.color_pair(addr_color))
-                screen.addstr(3 + line_num, 64 + column,
-                              char_value, curses.color_pair(addr_color))
-
+        CodeMode(screen, cursor_x, cursor_y, height)
+        # HexMode(screen, cursor_x, cursor_y, height)
 
         # Draw blinking cursor
         screen.move(3 + cursor_y, 11 + cursor_x*3 + int(cursor_x/4))
@@ -207,6 +242,15 @@ def load_file(filename):
     context["filesize_hex"] = f'{context["filesize"]:08X}'
     context["address"] = 0x00000000
     context["page_address"] = 0x00000000
+    try:
+        bfd = Bfd(filename)
+        section = bfd.sections.get(".text")
+        context["bfd"] = bfd
+        context["section"] = section
+        context["opcodes"] = Opcodes(bfd)
+        context["page_address"] = bfd.start_address
+    except:
+        pass
 
 
 def main():
