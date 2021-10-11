@@ -2,7 +2,8 @@
 #
 # HexItch - hex-editor
 #
-# (c) 2021 Felipe Correa da Silva Sanches <juca@members.fsf.org>
+# Copyright 2021 Felipe Correa da Silva Sanches <juca@members.fsf.org>
+# Copyright 2021 Ismael Luceno <ismael@iodev.co.uk>
 # Released under the terms of the GNU General Public License version 3 or later
 
 import curses
@@ -24,6 +25,15 @@ COLOR_TEXT = 5
 COLOR_TEXT_HIGHLIGHT = 6
 COLOR_MENU_NUMBERS = 7
 COLOR_MENU_WORDS = 8
+
+
+class SaveExcursion:
+    def __init__(self, curses_scr):
+        self.scr = curses_scr
+    def __enter__(self):
+        self.y, self.x = self.scr.getyx()
+    def __exit__(self, type, value, traceback):
+        self.scr.move(self.y, self.x)
 
 
 def CodeMode(screen, key, height):
@@ -235,37 +245,33 @@ def draw_ui(screen):
         def pad_str(s, width):
             return s + " " * (width - len(s) - 1)
 
+        with SaveExcursion(screen):
+            screen.addstr(0, 0, pad_str(header_str, width), curses.color_pair(COLOR_HEADER))
+            screen.addstr(1, 0, pad_str(subheader_str, width), curses.color_pair(COLOR_SUBHEADER))
+            screen.addstr(2, 0, "<Active>", curses.color_pair(COLOR_ADDRESS_HIGHLIGHT))
 
-        _y, _x = screen.getyx()
+            # Render menu bar
+            menu = { "1": "Info  ",
+                    " 2": "Save  ",
+                    " 3": "File  ",
+                    " 4": "Mode  ",
+                    " 5": "Goto  ",
+                    " 6": "Header",
+                    " 7": "Search",
+                    " 8": "Replac",
+                    " 9": "CalcIt",
+                    "10": "      "}
+            x = 0
+            for number, text in menu.items():
+                screen.addstr(height - 1, x,
+                            number, curses.color_pair(COLOR_MENU_NUMBERS))
+                x += len(number)
+                screen.addstr(height - 1, x,
+                            text, curses.color_pair(COLOR_MENU_WORDS))
+                x += len(text)
 
-        screen.addstr(0, 0, pad_str(header_str, width), curses.color_pair(COLOR_HEADER))
-        screen.addstr(1, 0, pad_str(subheader_str, width), curses.color_pair(COLOR_SUBHEADER))
-        screen.addstr(2, 0, "<Active>", curses.color_pair(COLOR_ADDRESS_HIGHLIGHT))
-
-        # Render menu bar
-        menu = { "1": "Info  ",
-                " 2": "Save  ",
-                " 3": "File  ",
-                " 4": "Mode  ",
-                " 5": "Goto  ",
-                " 6": "Header",
-                " 7": "Search",
-                " 8": "Replac",
-                " 9": "CalcIt",
-                "10": "      "}
-        x = 0
-        for number, text in menu.items():
             screen.addstr(height - 1, x,
-                          number, curses.color_pair(COLOR_MENU_NUMBERS))
-            x += len(number)
-            screen.addstr(height - 1, x,
-                          text, curses.color_pair(COLOR_MENU_WORDS))
-            x += len(text)
-
-        screen.addstr(height - 1, x,
-                      " " * (width - x - 1), curses.color_pair(COLOR_MENU_WORDS))
-
-        screen.move(_y, _x)
+                        " " * (width - x - 1), curses.color_pair(COLOR_MENU_WORDS))
 
         # Wait for next input
         key = screen.getch()
