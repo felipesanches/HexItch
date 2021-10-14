@@ -28,16 +28,24 @@ COLOR_MENU_WORDS = 8
 
 
 class HexItchContext:
-    def __init__(self):
-        self.filename = None
-        self.cursor_x = None
-        self.cursor_y = None
-        self.file = None
-        self.filesize = None
-        self.page_address = None
-        self.address = None
-        self.term_height = None
-        self.term_width = None
+    filename = None
+    cursor_x = None
+    cursor_y = None
+    file = None
+    filesize = None
+    filesize_hex = None
+    filesize_formatted = None
+    page_address = None
+    address = None
+    term_height = None
+    term_width = None
+
+    # Freeze the set of object attributes
+    def __setattr__(self, attr, val):
+        if not hasattr(self, attr):
+            raise AttributeError("type object '%s' has no attribute '%s'" %
+                                    (self.__class__.__name__, attr))
+        object.__setattr__(self, attr, val)
 
 
 class SaveExcursion:
