@@ -12,6 +12,7 @@ from pybfd3.opcodes import Opcodes
 import os
 import sys
 
+context = None
 PROGRAM_NAME = "HexItch"
 VERSION = "v0.0.1"
 RELEASE_YEAR = "2021"
@@ -33,14 +34,11 @@ class HexItchContext:
         self.cursor_y = None
         self.file = None
         self.filesize = None
-        self.filesize_hex = None
-        self.filesize_formatted = None
         self.page_address = None
         self.address = None
         self.term_height = None
         self.term_width = None
 
-context = HexItchContext()
 
 class SaveExcursion:
     def __init__(self, curses_scr):
@@ -65,46 +63,60 @@ class Motion():
     RIGHT = curses.KEY_RIGHT
 
 
-def move_cursor(ctx, mode, motion):
-    if motion in mode.navigation:
-        ctx.cursor_x += mode.navigation[motion]()
-        if ctx.cursor_x not in range(0, mode.line_len):
-            ctx.cursor_y += ctx.cursor_x // mode.line_len - (ctx.cursor_x < 0)
-            ctx.cursor_x %= mode.line_len
-            if ctx.cursor_y < 0:
-                ctx.cursor_y = 0;
-                if ctx.page_address > 0:
-                    ctx.page_address -= mode.line_len
-            elif ctx.cursor_y > ctx.term_height - 5:
-                ctx.cursor_y = ctx.term_height - 5;
-                if ctx.page_address + (ctx.term_height - 4) * mode.line_len < ctx.filesize:
-                    ctx.page_address += mode.line_len
-                    ctx.address = ctx.page_address + ctx.cursor_y * mode.line_len + ctx.cursor_x
-        if ctx.address >= ctx.filesize:
-            ctx.cursor_x = ctx.filesize % mode.line_len
-
-
-class CodeMode():
+class UIMode:
     def __init__(self):
+        pass
+
+    def move_cursor(self, ctx, motion):
+        if motion in self.navigation:
+            ctx.cursor_x += self.navigation[motion]()
+            if ctx.cursor_x not in range(0, self.line_len):
+                ctx.cursor_y += ctx.cursor_x // self.line_len - (ctx.cursor_x < 0)
+                ctx.cursor_x %= self.line_len
+                if ctx.cursor_y < 0:
+                    ctx.cursor_y = 0;
+                    if ctx.page_address > 0:
+                        ctx.page_address -= self.line_len
+                elif ctx.cursor_y > ctx.term_height - 5:
+                    ctx.cursor_y = ctx.term_height - 5;
+                    if ctx.page_address + (ctx.term_height - 4) * self.line_len < ctx.filesize:
+                        ctx.page_address += self.line_len
+                        ctx.address = ctx.page_address + \
+                                      ctx.cursor_y * self.line_len + ctx.cursor_x
+            if ctx.address >= ctx.filesize:
+                ctx.cursor_x = ctx.filesize % self.line_len
+
+
+class CodeMode(UIMode):
+    def __init__(self):
+        self.line_len = 1
+        self.x = 0
         self.navigation = {
-            Motion.UP:    (lambda: -self.x - self.prev_line_len),
-            Motion.DOWN:  (lambda: self.line_len - self.x),
-            Motion.LEFT:  (lambda: -1 if self.x > 0 else 0),
-            Motion.RIGHT: (lambda: 1 if self.x < self.line_len else 0),
+            Motion.UP:    (lambda: - context.cursor_x - 1 - 0*self.prev_line_len),
+            Motion.DOWN:  (lambda: self.line_len - context.cursor_x),
+            Motion.LEFT:  (lambda: -1),
+            Motion.RIGHT: (lambda: 1),
         }
 
-    def run(self, screen, key):
-        if "opcodes" not in context:
+    def draw(self, screen, key):
+        if not hasattr(context, "opcodes"):
             return
 
         context.file.seek(context.page_address)
         content = context.file.read((context.term_height - 5) * 10)
         dasm = context.opcodes.disassemble(content, context.page_address)
 
-        move_cursor(context, self, key)
+        self.move_cursor(context, key)
+
+        if context.cursor_y > 0:
+            self.prev_line_len = dasm[context.cursor_y-1][1]
+        else:
+            self.prev_line_len = 0
 
         vma, instr_size, instr = dasm[context.cursor_y]
-        context.address = context.page_address + context.cursor_y * 0x10 + context.cursor_x
+        self.line_len = instr_size
+        context.address = context.page_address + \
+                          context.cursor_y * 0x10 + context.cursor_x
 
         offset = 0
         for line_num in range(context.term_height - 3):
@@ -117,9 +129,12 @@ class CodeMode():
 
             vma, size, instr = dasm[line_num]
             screen.addstr(2 + line_num, 0,
-                        f"{vma:08X}", curses.color_pair(addr_color))
+                          f"{vma:08X}",
+                          curses.color_pair(addr_color))
             screen.addstr(2 + line_num, 40,
-                        instr, curses.color_pair(disasm_color))
+                          instr,
+                          curses.color_pair(disasm_color))
+
             for i in range(size):
                 if line_num == context.cursor_y and i == context.cursor_x:
                     text_color = COLOR_TEXT_HIGHLIGHT
@@ -127,13 +142,16 @@ class CodeMode():
                     text_color = COLOR_TEXT
 
                 screen.addstr(2 + line_num, 10 + 2*i,
-                            f"{content[offset]:02X}", curses.color_pair(text_color))
+                              f"{content[offset]:02X}",
+                              curses.color_pair(text_color))
                 offset += 1
 
         # Draw blinking cursor
-        screen.move(2 + context.cursor_y, 10 + context.cursor_x*2)
+        screen.move(2 + context.cursor_y,
+                    10 + context.cursor_x*2)
 
-class HexMode():
+
+class HexMode(UIMode):
     def __init__(self):
         self.line_len = 16
         self.navigation = {
@@ -143,8 +161,8 @@ class HexMode():
             Motion.RIGHT: (lambda: 1),
         }
 
-    def run(self, screen, key):
-        move_cursor(context, self, key)
+    def draw(self, screen, key):
+        self.move_cursor(context, key)
 
         # Draw column addresses on the top:
         for column in range(16):
@@ -152,10 +170,12 @@ class HexMode():
                 addr_color = COLOR_ADDRESS_HIGHLIGHT
             else:
                 addr_color = COLOR_ADDRESS
-            screen.addstr(2, 11 + column*3 + int(column/4),
-                        f"{column:02X}", curses.color_pair(addr_color))
+            screen.addstr(2, 11 + column * 3 + int(column / 4),
+                          f"{column:02X}",
+                          curses.color_pair(addr_color))
             screen.addstr(2, 64 + column,
-                        f"{column:1X}", curses.color_pair(addr_color))
+                          f"{column:1X}",
+                          curses.color_pair(addr_color))
 
         line_addr = context.page_address
         for line_num in range(context.term_height - 4):
@@ -164,7 +184,9 @@ class HexMode():
             else:
                 addr_color = COLOR_ADDRESS
 
-            screen.addstr(3 + line_num, 0, f'{line_addr:08X}', curses.color_pair(addr_color))
+            screen.addstr(3 + line_num, 0,
+                          f'{line_addr:08X}',
+                          curses.color_pair(addr_color))
 
             line_addr += 0x10
 
@@ -190,86 +212,103 @@ class HexMode():
                         char_value = "."
                     hex_value = f"{ord(value):02X}"
 
-                screen.addstr(3 + line_num, 11 + column*3 + int(column/4),
-                            hex_value, curses.color_pair(addr_color))
-                screen.addstr(3 + line_num, 64 + column,
-                            char_value, curses.color_pair(addr_color))
+                screen.addstr(3 + line_num,
+                              11 + column*3 + int(column / 4),
+                              hex_value, curses.color_pair(addr_color))
+                screen.addstr(3 + line_num,
+                              64 + column,
+                              char_value, curses.color_pair(addr_color))
+
         # Draw blinking cursor
-        screen.move(3 + context.cursor_y, 11 + context.cursor_x*3 + int(context.cursor_x/4))
+        screen.move(3 + context.cursor_y,
+                    11 + context.cursor_x * 3 + int(context.cursor_x / 4))
+
+
+def highlight(color):
+    return color + 8
+
+
+def pad_str(s, width):
+    return s + " " * (width - len(s))
+
+
+def draw_header(screen):
+    with SaveExcursion(screen):
+        percentage = f"{100 * context.address / context.filesize:.1f}%"
+        header_str = pad_str(f"Selected : 00000000h - -= {PROGRAM_NAME} {VERSION}"
+                             f" GPLv3+ Happy Hacking! {RELEASE_YEAR} =-"
+                             f" - 0  -   {format_filesize(context.filesize)}",
+                             context.term_width)
+        subheader_str = pad_str(f"{context.address:08X}/{context.filesize:08X}"
+                                f"  Hex      {percentage}   {context.filename}",
+                                context.term_width)
+
+        screen.addstr(0, 0, header_str,
+                      curses.color_pair(COLOR_HEADER))
+        screen.addstr(1, 0, subheader_str,
+                      curses.color_pair(COLOR_SUBHEADER))
+        screen.addstr(2, 0, "<Active>",
+                      curses.color_pair(COLOR_ADDRESS_HIGHLIGHT))
+
+
+def draw_menu(screen, menu):
+    with SaveExcursion(screen):
+        x = 0
+        for number, text in menu.items():
+            screen.addstr(context.term_height - 1, x,
+                          number,
+                          curses.color_pair(COLOR_MENU_NUMBERS))
+            x += len(number)
+            screen.addstr(context.term_height - 1, x,
+                          text,
+                          curses.color_pair(COLOR_MENU_WORDS))
+            x += len(text)
+
+        screen.addstr(context.term_height - 1, x,
+                      " " * (context.term_width - x - 1),
+                      curses.color_pair(COLOR_MENU_WORDS))
 
 
 def draw_ui(screen):
-    screen.clear()
-
     key = None
     context.cursor_x = 0
     context.cursor_y = 0
 
-    def highlight(color):
-        return color + 8
-
     # Start colors in curses
     curses.start_color()
-    curses.init_pair(COLOR_HEADER, curses.COLOR_WHITE, curses.COLOR_BLUE)
-    curses.init_pair(COLOR_SUBHEADER, curses.COLOR_WHITE, curses.COLOR_RED)
-    curses.init_pair(COLOR_ADDRESS, curses.COLOR_BLUE, curses.COLOR_BLACK)
-    curses.init_pair(COLOR_ADDRESS_HIGHLIGHT, highlight(curses.COLOR_BLUE), curses.COLOR_BLACK)
-    curses.init_pair(COLOR_TEXT, highlight(curses.COLOR_BLACK), curses.COLOR_BLACK)
-    curses.init_pair(COLOR_TEXT_HIGHLIGHT, curses.COLOR_WHITE, curses.COLOR_BLACK)
-    curses.init_pair(COLOR_MENU_NUMBERS, curses.COLOR_WHITE, curses.COLOR_BLACK)
-    curses.init_pair(COLOR_MENU_WORDS, curses.COLOR_BLACK, curses.COLOR_CYAN)
+    curses.init_pair(COLOR_HEADER,            curses.COLOR_WHITE,            curses.COLOR_BLUE)
+    curses.init_pair(COLOR_SUBHEADER,         curses.COLOR_WHITE,            curses.COLOR_RED)
+    curses.init_pair(COLOR_ADDRESS,           curses.COLOR_BLUE,             curses.COLOR_BLACK)
+    curses.init_pair(COLOR_ADDRESS_HIGHLIGHT, highlight(curses.COLOR_BLUE),  curses.COLOR_BLACK)
+    curses.init_pair(COLOR_TEXT,              highlight(curses.COLOR_BLACK), curses.COLOR_BLACK)
+    curses.init_pair(COLOR_TEXT_HIGHLIGHT,    curses.COLOR_WHITE,            curses.COLOR_BLACK)
+    curses.init_pair(COLOR_MENU_NUMBERS,      curses.COLOR_WHITE,            curses.COLOR_BLACK)
+    curses.init_pair(COLOR_MENU_WORDS,        curses.COLOR_BLACK,            curses.COLOR_CYAN)
 
-    mode = HexMode()
-    #mode = CodeMode()
-    # Loop where `key` is the last character pressed
+    FAKE_MENU = {  "1": "Info  ",
+                  " 2": "Save  ",
+                  " 3": "File  ",
+                  " 4": "Mode  ",
+                  " 5": "Goto  ",
+                  " 6": "Header",
+                  " 7": "Search",
+                  " 8": "Replac",
+                  " 9": "CalcIt",
+                  "10": "      "}
+
+    #current_mode = HexMode()
+    current_mode = CodeMode()
+
     while (key != ord('q')):
-
-        # Initialization
         context.term_height, context.term_width = screen.getmaxyx()
         screen.clear()
 
-        mode.run(screen, key)
+        draw_header(screen)
+        current_mode.draw(screen, key)
+        draw_menu(screen, FAKE_MENU)
 
-        # Rendering some text
-        percentage = 100*context.address/context.filesize
-        percentage = f"{percentage:.1f}%"
-        header_str = f"Selected : 00000000h - -= {PROGRAM_NAME} {VERSION} GPLv3+ Felipe Sanches {RELEASE_YEAR} =- - 0  -   {context.filesize_formatted}"
-        subheader_str = f"{context.address:08X}/{context.filesize_hex}  Hex      {percentage}   {context.filename}"
-
-        def pad_str(s, width):
-            return s + " " * (width - len(s) - 1)
-
-        with SaveExcursion(screen):
-            screen.addstr(0, 0, pad_str(header_str, context.term_width), curses.color_pair(COLOR_HEADER))
-            screen.addstr(1, 0, pad_str(subheader_str, context.term_width), curses.color_pair(COLOR_SUBHEADER))
-            screen.addstr(2, 0, "<Active>", curses.color_pair(COLOR_ADDRESS_HIGHLIGHT))
-
-            # Render menu bar
-            menu = { "1": "Info  ",
-                    " 2": "Save  ",
-                    " 3": "File  ",
-                    " 4": "Mode  ",
-                    " 5": "Goto  ",
-                    " 6": "Header",
-                    " 7": "Search",
-                    " 8": "Replac",
-                    " 9": "CalcIt",
-                    "10": "      "}
-            x = 0
-            for number, text in menu.items():
-                screen.addstr(context.term_height - 1, x,
-                              number, curses.color_pair(COLOR_MENU_NUMBERS))
-                x += len(number)
-                screen.addstr(context.term_height - 1, x,
-                              text, curses.color_pair(COLOR_MENU_WORDS))
-                x += len(text)
-
-            screen.addstr(context.term_height - 1, x,
-                          " " * (context.term_width - x - 1),
-                          curses.color_pair(COLOR_MENU_WORDS))
         # Wait for next input
         key = screen.getch()
-        # Refresh the screen
         screen.refresh()
 
 
@@ -288,8 +327,6 @@ def load_file(filename):
     context.filename = filename
     context.file = open(filename, "rb")
     context.filesize = os.path.getsize(filename)
-    context.filesize_formatted = format_filesize(context.filesize)
-    context.filesize_hex = f'{context.filesize:08X}'
     context.address = 0x00000000
     context.page_address = 0x00000000
     try:
@@ -304,8 +341,11 @@ def main():
     if len(sys.argv) != 2:
         print(f"Usage: {sys.argv[0]} <filename>")
     else:
+        global context
+        context = HexItchContext()
         load_file(sys.argv[1])
         curses.wrapper(draw_ui)
+
 
 if __name__ == "__main__":
     main()
