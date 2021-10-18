@@ -95,7 +95,7 @@ class UIMode:
                 if ctx.cursor_y < 0:
                     ctx.cursor_y = 0;
                     if ctx.page_address > 0:
-                        ctx.page_address -= self.line_len
+                        ctx.page_address -= min(self.line_len, ctx.page_address)
                 elif ctx.cursor_y > ctx.term_height - 5:
                     ctx.cursor_y = ctx.term_height - 5;
                     if ctx.page_address + (ctx.term_height - 4) * self.line_len < ctx.filesize:
