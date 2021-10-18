@@ -6,6 +6,7 @@
 # Copyright 2021 Ismael Luceno <ismael@iodev.co.uk>
 # Released under the terms of the GNU General Public License version 3 or later
 
+from collections import defaultdict
 import curses
 from pybfd3.bfd import Bfd
 from pybfd3.opcodes import Opcodes
@@ -42,11 +43,19 @@ class HexItchContext:
     bfd = None
     opcodes = None
 
-    # Freeze the set of object attributes
+    def _any_valid(v):
+        return True
+    _validate_value = defaultdict(lambda: HexItchContext._any_valid, {
+        "page_address": lambda v: v >= 0,
+    })
+
     def __setattr__(self, attr, val):
+        # Freeze the set of object attributes
         if not hasattr(self, attr):
             raise AttributeError("type object '%s' has no attribute '%s'" %
                                     (self.__class__.__name__, attr))
+        if not self._validate_value[attr](val):
+            raise ValueError("invalid value for attribute '%s'" % (attr))
         object.__setattr__(self, attr, val)
 
 
