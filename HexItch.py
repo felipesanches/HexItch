@@ -39,6 +39,8 @@ class HexItchContext:
     address = None
     term_height = None
     term_width = None
+    bfd = None
+    opcodes = None
 
     # Freeze the set of object attributes
     def __setattr__(self, attr, val):
